@@ -32,6 +32,14 @@
 #include "sl_bluetooth.h"
 #include "app.h"
 #include "app_log.h"
+#include "gatt_db.h"
+#include "sl_bt_api.h"
+#include "sl_sensor_rht.h"
+#include "sl_sleeptimer.h"
+#include "temperature.h"
+#define TEMPERATURE_TIMER_SIGNAL (1<<0)
+
+
 // The advertising set handle allocated from Bluetooth stack.
 static uint8_t advertising_set_handle = 0xff;
 
@@ -66,9 +74,14 @@ SL_WEAK void app_process_action(void)
  *
  * @param[in] evt Event coming from the Bluetooth stack.
  *****************************************************************************/
+
+
+
 void sl_bt_on_event(sl_bt_msg_t *evt)
 {
   sl_status_t sc;
+  static sl_sleeptimer_timer_handle_t timer1;
+  int16_t BLE;
 
   switch (SL_BT_MSG_ID(evt->header)) {
     // -------------------------------
@@ -103,14 +116,57 @@ void sl_bt_on_event(sl_bt_msg_t *evt)
     case sl_bt_evt_connection_opened_id:
       app_log_info("%s: connection_opened!\n", __FUNCTION__);
       sl_sensor_rht_init();
-      app_log_info("BLE = %d\n", Conversion_deg_BLE ());
+
+
       break;
 
     case sl_bt_evt_gatt_server_user_read_request_id:
-          app_log_info("%s: Lecture de la température!\n", __FUNCTION__);
+
+          if(evt->data.evt_gatt_server_user_read_request.characteristic == gattdb_temperature)
+            {
+              app_log_info("%s: mode read!\n", __FUNCTION__);
+              app_log_info("BLE = %d\n", Conversion_deg_BLE ());
+              BLE = Conversion_deg_BLE ();
+              sl_bt_gatt_server_send_user_read_response(evt->data.evt_gatt_server_user_read_request.connection,
+                                              gattdb_temperature, 0, sizeof(BLE), (uint8_t*)& BLE, 0);
+            }
+
 
           break;
 
+    case sl_bt_evt_gatt_server_characteristic_status_id :
+
+      if(evt->data.evt_gatt_server_characteristic_status.characteristic == gattdb_temperature)
+        {
+        if(evt->data.evt_gatt_server_characteristic_status.status_flags == 0x01)
+
+            {
+              app_log_info("%s: mode notify has changed!\n", __FUNCTION__);
+
+              if (evt->data.evt_gatt_server_characteristic_status.client_config_flags == sl_bt_gatt_server_notification)
+                {
+                  app_log_info("%s: enable!\n", __FUNCTION__);
+                  sl_sleeptimer_start_periodic_timer_ms(&timer1, 1000, callbackfct, NULL, 0,0);
+
+                }
+              if (evt->data.evt_gatt_server_characteristic_status.client_config_flags == sl_bt_gatt_server_disable)
+                              {
+                                app_log_info("%s: disable!\n", __FUNCTION__);
+                                sl_sleeptimer_stop_timer(&timer1);
+                              }
+
+            }
+        }
+
+          break;
+
+
+    case sl_bt_evt_system_external_signal_id :
+
+      {
+        if(evt->data.evt_system_external_signal_id)
+      }
+          break;
     // -------------------------------
     // This event indicates that a connection was closed.
     case sl_bt_evt_connection_closed_id:
@@ -138,3 +194,4 @@ void sl_bt_on_event(sl_bt_msg_t *evt)
       break;
   }
 }
+
